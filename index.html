@@ -37,8 +37,14 @@
 
     .status {
       color: #666;
-      margin-bottom: 30px;
+      margin-bottom: 10px;
       min-height: 24px;
+    }
+
+    .last-update {
+      color: #444;
+      margin-bottom: 30px;
+      font-size: 16px;
     }
 
     .panel {
@@ -54,11 +60,14 @@
       margin-bottom: 10px;
     }
 
-    input[type="time"] {
+    input[type="number"] {
       font-size: 24px;
       padding: 10px 12px;
       border-radius: 10px;
       border: 1px solid #ccc;
+      width: 80px;
+      text-align: center;
+      margin: 4px;
     }
 
     button {
@@ -88,8 +97,9 @@
         font-size: 46px;
       }
 
-      input[type="time"] {
-        width: 90%;
+      input[type="number"] {
+        width: 60px;
+        font-size: 20px;
       }
     }
   </style>
@@ -97,14 +107,22 @@
 <body>
   <div class="wrap">
     <h1>統一時間</h1>
+
     <div class="clock" id="clock">--:--:--</div>
     <div class="status" id="status">正在連線資料庫...</div>
+    <div class="last-update" id="lastUpdate">最後修改時間：--</div>
 
     <div class="panel">
-      <label for="timeInput">輸入新時間</label>
-      <input type="time" id="timeInput" step="1" />
+      <label>輸入新時間</label>
+
+      <input type="number" id="hourInput" min="0" max="23" placeholder="時" />
+      <input type="number" id="minuteInput" min="0" max="59" placeholder="分" />
+      <input type="number" id="secondInput" min="0" max="59" placeholder="秒" />
+
       <br />
+
       <button id="updateBtn">更新統一時間</button>
+
       <div class="tip">
         所有人都可以修改。<br />
         修改後，所有開著此頁面的人會同步看到新時間。
@@ -121,7 +139,6 @@
       set
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-    // 1. 請換成你自己的 Firebase 設定
     const firebaseConfig = {
       apiKey: "AIzaSyC7Q3VBppTIuBcz3UsCBSd6w-c_bGQPg4U",
       authDomain: "time-f0661.firebaseapp.com",
@@ -136,16 +153,20 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // 資料庫路徑
     const timeRef = ref(db, "sharedTime");
 
-    let currentBaseTime = null; // 例如 "14:30:00"
-    let currentSetAt = null;    // 時間被設定時的時間戳 ms
+    let currentBaseTime = null;
+    let currentSetAt = null;
     let timerId = null;
 
     const clockEl = document.getElementById("clock");
     const statusEl = document.getElementById("status");
-    const timeInputEl = document.getElementById("timeInput");
+    const lastUpdateEl = document.getElementById("lastUpdate");
+
+    const hourInputEl = document.getElementById("hourInput");
+    const minuteInputEl = document.getElementById("minuteInput");
+    const secondInputEl = document.getElementById("secondInput");
+
     const updateBtn = document.getElementById("updateBtn");
 
     function parseHHMMSS(timeStr) {
@@ -163,6 +184,19 @@
       return `${hh}:${mm}:${ss}`;
     }
 
+    function formatDateTime(timestamp) {
+      const d = new Date(timestamp);
+
+      const yyyy = d.getFullYear();
+      const MM = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+
+      return `${yyyy}/${MM}/${dd} ${hh}:${mm}:${ss}`;
+    }
+
     function startLocalClock(baseTime, setAt) {
       currentBaseTime = baseTime;
       currentSetAt = setAt;
@@ -174,14 +208,10 @@
       function updateDisplay() {
         const { h, m, s } = parseHHMMSS(currentBaseTime);
 
-        // 建立「基準時間」
         const baseDate = new Date();
         baseDate.setHours(h, m, s, 0);
 
-        // 算出從設定那刻到現在過了多久
         const elapsed = Date.now() - currentSetAt;
-
-        // 用基準時間 + 經過時間 = 目前統一時間
         const currentDate = new Date(baseDate.getTime() + elapsed);
 
         clockEl.textContent = formatTime(currentDate);
@@ -191,47 +221,63 @@
       timerId = setInterval(updateDisplay, 200);
     }
 
-    // 2. 監聽 Firebase 資料
     onValue(timeRef, (snapshot) => {
       const data = snapshot.val();
 
       if (!data) {
         clockEl.textContent = "--:--:--";
         statusEl.textContent = "目前尚未設定時間";
+        lastUpdateEl.textContent = "最後修改時間：--";
         return;
       }
 
       if (!data.baseTime || !data.setAt) {
         clockEl.textContent = "--:--:--";
         statusEl.textContent = "資料格式不完整";
+        lastUpdateEl.textContent = "最後修改時間：--";
         return;
       }
 
       startLocalClock(data.baseTime, data.setAt);
       statusEl.textContent = "已同步";
+
+      if (data.updatedAt) {
+        lastUpdateEl.textContent = "最後修改時間：" + formatDateTime(data.updatedAt);
+      } else {
+        lastUpdateEl.textContent = "最後修改時間：--";
+      }
     }, (error) => {
       console.error(error);
       statusEl.textContent = "讀取失敗";
     });
 
-    // 3. 按下按鈕後寫入新時間
     updateBtn.addEventListener("click", async () => {
-      let value = timeInputEl.value;
+      const h = Number(hourInputEl.value);
+      const m = Number(minuteInputEl.value);
+      const s = Number(secondInputEl.value);
 
-      if (!value) {
-        alert("請先輸入時間");
+      if (
+        Number.isNaN(h) || Number.isNaN(m) || Number.isNaN(s) ||
+        h < 0 || h > 23 ||
+        m < 0 || m > 59 ||
+        s < 0 || s > 59
+      ) {
+        alert("請輸入正確時間：時 0-23、分 0-59、秒 0-59");
         return;
       }
 
-      // input[type=time] 有時只會給 HH:MM，要補成 HH:MM:SS
-      if (value.length === 5) {
-        value += ":00";
-      }
+      const value =
+        String(h).padStart(2, "0") + ":" +
+        String(m).padStart(2, "0") + ":" +
+        String(s).padStart(2, "0");
 
       try {
+        const now = Date.now();
+
         await set(timeRef, {
           baseTime: value,
-          setAt: Date.now()
+          setAt: now,
+          updatedAt: now
         });
 
         statusEl.textContent = "更新成功";
